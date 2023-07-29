@@ -35,6 +35,22 @@ func Run(scriptPath string, wg *sync.WaitGroup) {
 
 func Process(context *fiber.Ctx) error {
 
+	// get fileUrl from body
+	var requestBody struct {
+		fileUrl string `json:"fileUrl"`
+	}
+
+	if err := context.BodyParser(&requestBody); err != nil {
+		// log error
+		// return error with message and status code
+		return context.Status(400).JSON(fiber.Map{
+			"message": "fileUrl is required",
+		})
+	}
+
+	// fileURL := requestBody.fileUrl
+
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 
