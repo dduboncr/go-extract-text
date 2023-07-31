@@ -86,59 +86,6 @@ func processImageStream(imageStream []byte) (string, error) {
 
 	return text, nil
 }
-Read the image files from the stream and call the processing function:
-go
-Copy code
-func main() {
-	// Replace this with your image stream or file paths
-	images := []string{"path/to/image1.jpg", "path/to/image2.png"}
-
-	for _, imagePath := range images {
-		imageStream, err := loadImage(imagePath)
-		if err != nil {
-			fmt.Printf("Error loading image %s: %s\n", imagePath, err)
-			continue
-		}
-
-		text, err := processImageStream(imageStream)
-		if err != nil {
-			fmt.Printf("Error processing image %s: %s\n", imagePath, err)
-			continue
-		}
-
-		fmt.Printf("OCR Result for %s:\n%s\n", imagePath, text)
-	}
-}
-
-func loadImage(imagePath string) ([]byte, error) {
-	// If imagePath is a URL, read the image from the URL here
-	// Otherwise, read the image from a local file
-	if strings.HasPrefix(imagePath, "http://") || strings.HasPrefix(imagePath, "https://") {
-		// Code to read image from URL
-		// ...
-	} else {
-		// Read the image from a local file
-		absImagePath, err := filepath.Abs(imagePath)
-		if err != nil {
-			return nil, err
-		}
-
-		imageFile, err := os.Open(absImagePath)
-		if err != nil {
-			return nil, err
-		}
-		defer imageFile.Close()
-
-		imageData, err := ioutil.ReadAll(imageFile)
-		if err != nil {
-			return nil, err
-		}
-
-		return imageData, nil
-	}
-	return nil, fmt.Errorf("unsupported image source: %s", imagePath)
-}
-
 
 
 
