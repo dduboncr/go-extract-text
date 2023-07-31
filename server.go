@@ -1,8 +1,6 @@
 package main
 
 import (
-	"extract/controllers"
-
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -11,7 +9,7 @@ import (
 
 
 func SetupRoutes(app *fiber.App) {
-	app.Post("/process", controllers.Process)
+	app.Post("/process", controllers.process)
 
 }
 
