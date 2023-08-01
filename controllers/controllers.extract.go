@@ -105,27 +105,17 @@ func downloadFile(bucketName, objectName, localFilePath string) (string, error) 
 	return localFilePath, nil
 }
 
-func extractFrames(filePath string) error {
-	// clean up frames folder
-	os.RemoveAll("frames")
-	fmt.Print("Removed frames folder\n")
-
-	// using ffmpeg to extract frames
-	cmd := exec.Command("ffmpeg", "-i", filePath, "-vf", "fps=1", "frames/frame%d.jpg")
-
-	// Set up the standard output and error output to be the same as the current process
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// Execute the command
-	err := cmd.Run()
-
+func getVideoDuration(inputVideoPath string) (string, error) {
+	// get video duration using ffmpeg
+	cmd := exec.Command("ffmpeg", "-i", inputVideoPath, "2>&1", "|", "grep", "Duration", "|", "awk", "'{print $2}'", "|", "tr", "-d", ",")
+	// run the command and get the output
+	out, err := cmd.Output()
 	if err != nil {
-		fmt.Printf("Error executing bash script %s: %s\n", filePath, err)
-		return err
+		fmt.Printf("Error executing bash script %s: %s\n", inputVideoPath, err)
+		return "", err
 	}
 
-	return nil
+	return string(out), nil
 }
 
 func Process(context *fiber.Ctx) error {
@@ -158,8 +148,7 @@ func Process(context *fiber.Ctx) error {
 	}
 
 	duration, durationErr := getVideoDurationSeconds(filePath)
-
-	// secondList := secondsToTimeList(int(duration))
+	secondList := secondsToTimeList(int(duration))
 
 	if durationErr != nil {
 		// print error
@@ -178,8 +167,9 @@ func Process(context *fiber.Ctx) error {
 	// }
 
 	context.Status(200).JSON(fiber.Map{
-		"filePath": filePath,
-		"duration": duration,
+		"filePath":   filePath,
+		"secondList": secondList,
 	})
+
 	return nil
 }
