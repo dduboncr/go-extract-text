@@ -14,19 +14,17 @@ func SetupRoutes(app *fiber.App) {
 
 }
 
-
 func main() {
 
 	app := fiber.New()
 
-	SetupRoutes(app);
+	SetupRoutes(app)
 
 	app.Use(recover.New())
 	app.Use(cors.New())
 	app.Use(logger.New(logger.Config{
 		Format: "[${ip}]:${port} ${status} - ${method} ${path}\n",
 	}))
-	
 
 	app.Listen(":3000")
 }
