@@ -5,6 +5,7 @@ go 1.18
 require (
 	cloud.google.com/go/storage v1.31.0
 	github.com/gofiber/fiber/v2 v2.48.0
+	github.com/xfrr/goffmpeg v0.0.0-20210624103149-5ca2d3062daf
 	google.golang.org/api v0.134.0
 )
 

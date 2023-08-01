@@ -1,11 +1,13 @@
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 
 	"cloud.google.com/go/storage"
 	"github.com/gofiber/fiber/v2"
@@ -94,17 +96,48 @@ func downloadFile(bucketName, objectName, localFilePath string) (string, error) 
 	return localFilePath, nil
 }
 
-func getVideoDuration(inputVideoPath string) (string, error) {
-	// get video duration using ffmpeg
-	cmd := exec.Command("ffmpeg", "-i", inputVideoPath, "2>&1", "|", "grep", "Duration", "|", "awk", "'{print $2}'", "|", "tr", "-d", ",")
-	// run the command and get the output
-	out, err := cmd.Output()
-	if err != nil {
-		fmt.Printf("Error executing bash script %s: %s\n", inputVideoPath, err)
-		return "", err
+func secondsToTimeList(totalSeconds int) []string {
+	var timeList []string
+
+	for seconds := 1; seconds <= totalSeconds; seconds++ {
+		hours := seconds / 3600
+		minutes := (seconds % 3600) / 60
+		remainingSeconds := seconds % 60
+
+		// Pad single-digit hours, minutes, and seconds with leading zeros
+		formattedTime := fmt.Sprintf("%02d:%02d:%02d", hours, minutes, remainingSeconds)
+
+		timeList = append(timeList, formattedTime)
 	}
 
-	return string(out), nil
+	return timeList
+}
+
+func getTimestamps(inputFile string) ([]string, error) {
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-text-frames-gcs.bash && get_timestamps \"%s\"", inputFile))
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return nil, fmt.Errorf("error executing bash script: %s", stderr.String())
+	}
+	output := strings.TrimSpace(stdout.String())
+	timestamps := strings.Split(output, " ")
+	return timestamps, nil
+}
+
+func extractText(inputFile, timestamp string) (string, error) {
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-text-frames-gcs.bash && extract_text \"%s\" \"%s\"", inputFile, timestamp))
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		return "", fmt.Errorf("error executing bash script: %s", stderr.String())
+	}
+	output := strings.TrimSpace(stdout.String())
+	return output, nil
 }
 
 func Process(context *fiber.Ctx) error {
@@ -136,25 +169,30 @@ func Process(context *fiber.Ctx) error {
 		})
 	}
 
-	// extract frames from video
-	// err = extractFrames(filePath)
-
-	// if err != nil {
-	// 	return context.Status(400).JSON(fiber.Map{
-	// 		"message": "error extracting frames",
-	// 	})
-	// }
-
-	videoDuration, err := getVideoDuration(filePath)
+	timestamps, err := getTimestamps(filePath)
 	if err != nil {
 		return context.Status(400).JSON(fiber.Map{
 			"message": "error getting video duration",
 		})
 	}
 
+	var extractedTexts []string
+	for _, timestamp := range timestamps {
+		text, err := extractText(filePath, timestamp)
+		if err != nil {
+			return context.Status(400).JSON(fiber.Map{
+				"message": "error extracting text",
+			})
+		}
+		extractedTexts = append(extractedTexts, text)
+	}
+
+	// print content of extractedTexts
+	fmt.Printf("Extracted texts: %s\n", extractedTexts)
+
 	context.Status(200).JSON(fiber.Map{
-		"filePath": filePath,
-		"duration": videoDuration,
+		"filePath":   filePath,
+		"timestamps": timestamps,
 	})
 
 	return nil
