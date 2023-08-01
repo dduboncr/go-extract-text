@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
+	"sync"
 
 	"cloud.google.com/go/storage"
 	"github.com/gofiber/fiber/v2"
@@ -56,7 +58,6 @@ func fileExists(filename string) bool {
 }
 
 func downloadFile(bucketName, objectName, localFilePath string) (string, error) {
-
 	if fileExists(localFilePath) {
 		fmt.Printf("File already exists in local: %s\n", localFilePath)
 		return localFilePath, nil
@@ -96,25 +97,8 @@ func downloadFile(bucketName, objectName, localFilePath string) (string, error) 
 	return localFilePath, nil
 }
 
-func secondsToTimeList(totalSeconds int) []string {
-	var timeList []string
-
-	for seconds := 1; seconds <= totalSeconds; seconds++ {
-		hours := seconds / 3600
-		minutes := (seconds % 3600) / 60
-		remainingSeconds := seconds % 60
-
-		// Pad single-digit hours, minutes, and seconds with leading zeros
-		formattedTime := fmt.Sprintf("%02d:%02d:%02d", hours, minutes, remainingSeconds)
-
-		timeList = append(timeList, formattedTime)
-	}
-
-	return timeList
-}
-
 func getTimestamps(inputFile string) ([]string, error) {
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-text-frames-gcs.bash && get_timestamps \"%s\"", inputFile))
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-visual-texts.bash && get_timestamps \"%s\"", inputFile))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -128,7 +112,7 @@ func getTimestamps(inputFile string) ([]string, error) {
 }
 
 func extractText(inputFile, timestamp string) (string, error) {
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-text-frames-gcs.bash && extract_text \"%s\" \"%s\"", inputFile, timestamp))
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-visual-texts.bash && extract_text \"%s\" \"%s\"", inputFile, timestamp))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -142,7 +126,6 @@ func extractText(inputFile, timestamp string) (string, error) {
 
 func Process(context *fiber.Ctx) error {
 
-	// get fileUrl from body
 	var requestBody struct {
 		fileUrl string `json:"fileUrl"`
 	}
@@ -155,12 +138,11 @@ func Process(context *fiber.Ctx) error {
 
 	// download file from fileUrl
 	filePath, err := downloadFile(
-		"flowpi-test-bucket",
-		"extract_text.mp4",
-		"extract_text.mp4",
+		"flowpi-test-bucket", // fileUrl
+		"extract_text.mp4",   // objectName
+		"extract_text.mp4",   // localFilePath
 	)
 
-	// log filepath
 	fmt.Printf("Filepath: %s\n", filePath)
 
 	if err != nil {
@@ -171,19 +153,63 @@ func Process(context *fiber.Ctx) error {
 
 	timestamps, err := getTimestamps(filePath)
 	if err != nil {
+		fmt.Printf("Error getting timestamps: %s\n", err)
 		return context.Status(400).JSON(fiber.Map{
 			"message": "error getting video duration",
 		})
 	}
 
+	// var extractedTexts []string
+	// for _, timestamp := range timestamps {
+	// 	text, err := extractText(filePath, timestamp)
+	// 	if err != nil {
+	// 		return context.Status(400).JSON(fiber.Map{
+	// 			"message": "error extracting text",
+	// 		})
+	// 	}
+	// 	extractedTexts = append(extractedTexts, text)
+	// }
+
+	numCPU := runtime.NumCPU()
+	maxWorkers := runtime.GOMAXPROCS(numCPU / 2)
 	var extractedTexts []string
+	var wg sync.WaitGroup
+	ch := make(chan string, len(timestamps))
+	workerCh := make(chan int, maxWorkers)
+
+	// print maxWorkers
+	fmt.Printf("Max workers: %d\n", maxWorkers)
+
 	for _, timestamp := range timestamps {
-		text, err := extractText(filePath, timestamp)
-		if err != nil {
-			return context.Status(400).JSON(fiber.Map{
-				"message": "error extracting text",
-			})
+		fmt.Printf("timestamp:", timestamp)
+		activeWorkers := runtime.NumGoroutine()
+		if activeWorkers < maxWorkers {
+			wg.Add(1)
+			workerCh <- 1 // Send a signal to the worker to indicate a new task
+			go func(ts string) {
+				defer wg.Done()
+				text, err := extractText(filePath, ts)
+				if err != nil {
+					// You may handle the error as needed
+					// For simplicity, let's just log the error here
+					fmt.Println("Error extracting text:", err)
+					return
+				}
+				ch <- text
+			}(timestamp)
+			wg.Wait()
+		} else {
+			// Wait for a worker to finish before sending a new signal
+			fmt.Printf("waiting for a new worker:", timestamp)
+			wg.Wait()
 		}
+	}
+
+	wg.Wait()
+	close(ch)
+	close(workerCh)
+
+	for text := range ch {
 		extractedTexts = append(extractedTexts, text)
 	}
 
