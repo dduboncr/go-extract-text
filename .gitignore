@@ -20,3 +20,4 @@ credentials.json
 *.env
 *.env.*
 *.local
+extract_text.mp4

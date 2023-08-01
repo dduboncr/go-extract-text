@@ -2,6 +2,7 @@ package main
 
 import (
 	"extract/controllers"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -14,19 +15,20 @@ func SetupRoutes(app *fiber.App) {
 
 }
 
-
 func main() {
 
 	app := fiber.New()
 
-	SetupRoutes(app);
+	SetupRoutes(app)
 
 	app.Use(recover.New())
 	app.Use(cors.New())
 	app.Use(logger.New(logger.Config{
 		Format: "[${ip}]:${port} ${status} - ${method} ${path}\n",
 	}))
-	
 
-	app.Listen(":3000")
+	if err := app.Listen(":3000"); err != nil {
+		log.Fatal(err)
+
+	}
 }

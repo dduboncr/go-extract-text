@@ -6,11 +6,45 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/gofiber/fiber/v2"
 	"google.golang.org/api/option"
 )
+
+func secondsToTimeList(totalSeconds int) []string {
+	var timeList []string
+
+	for seconds := 1; seconds <= totalSeconds; seconds++ {
+		hours := seconds / 3600
+		minutes := (seconds % 3600) / 60
+		remainingSeconds := seconds % 60
+
+		// Pad single-digit hours, minutes, and seconds with leading zeros
+		formattedTime := fmt.Sprintf("%02d:%02d:%02d", hours, minutes, remainingSeconds)
+
+		timeList = append(timeList, formattedTime)
+	}
+
+	return timeList
+}
+
+func getVideoDurationSeconds(inputFile string) (int64, error) {
+	// Get file info
+	fileInfo, err := os.Stat(inputFile)
+	if err != nil {
+		return 0, err
+	}
+
+	// Get the file's modification time
+	modTime := fileInfo.ModTime()
+
+	// Calculate the duration in seconds from the modification time
+	durationSeconds := time.Since(modTime).Seconds()
+
+	return int64(durationSeconds), nil
+}
 
 func fileExists(filename string) bool {
 	// Use os.Stat to get file information
@@ -123,17 +157,29 @@ func Process(context *fiber.Ctx) error {
 		})
 	}
 
-	// extract frames from video
-	err = extractFrames(filePath)
+	duration, durationErr := getVideoDurationSeconds(filePath)
 
-	if err != nil {
+	// secondList := secondsToTimeList(int(duration))
+
+	if durationErr != nil {
+		// print error
+		fmt.Printf("Error getting video duration: %s\n", durationErr)
 		return context.Status(400).JSON(fiber.Map{
-			"message": "error extracting frames",
+			"message": "error getting video duration",
 		})
 	}
+	// // extract frames from video
+	// err = extractFrames(filePath)
+
+	// if err != nil {
+	// 	return context.Status(400).JSON(fiber.Map{
+	// 		"message": "error extracting frames",
+	// 	})
+	// }
 
 	context.Status(200).JSON(fiber.Map{
 		"filePath": filePath,
+		"duration": duration,
 	})
 	return nil
 }
