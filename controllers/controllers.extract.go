@@ -103,15 +103,22 @@ func getTimestamps(inputFile string) ([]string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
+
 	if err != nil {
 		return nil, fmt.Errorf("error executing bash script: %s", stderr.String())
 	}
 	output := strings.TrimSpace(stdout.String())
+	fmt.Printf("Output: %s\n", output)
 	timestamps := strings.Split(output, " ")
+
+	fmt.Printf("Timestamps: %s\n", timestamps)
+
 	return timestamps, nil
 }
 
-func extractText(inputFile, timestamp string) (string, error) {
+func extractText(inputFile, timestamp string, wg *sync.WaitGroup, results chan<- string) (string, error) {
+	defer wg.Done()
+
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-visual-texts.bash && extract_text \"%s\" \"%s\"", inputFile, timestamp))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -121,6 +128,9 @@ func extractText(inputFile, timestamp string) (string, error) {
 		return "", fmt.Errorf("error executing bash script: %s", stderr.String())
 	}
 	output := strings.TrimSpace(stdout.String())
+
+	results <- output
+
 	return output, nil
 }
 
@@ -151,7 +161,9 @@ func Process(context *fiber.Ctx) error {
 		})
 	}
 
-	timestamps, err := getTimestamps(filePath)
+	// timestamps, err := getTimestamps(filePath)
+
+	timestamps := []string{"00:00:00", "00:00:01", "00:00:02", "00:00:03", "00:00:04", "00:00:05"}
 	if err != nil {
 		fmt.Printf("Error getting timestamps: %s\n", err)
 		return context.Status(400).JSON(fiber.Map{
@@ -159,66 +171,52 @@ func Process(context *fiber.Ctx) error {
 		})
 	}
 
-	// var extractedTexts []string
-	// for _, timestamp := range timestamps {
-	// 	text, err := extractText(filePath, timestamp)
-	// 	if err != nil {
-	// 		return context.Status(400).JSON(fiber.Map{
-	// 			"message": "error extracting text",
-	// 		})
-	// 	}
-	// 	extractedTexts = append(extractedTexts, text)
-	// }
-
 	numCPU := runtime.NumCPU()
 	maxWorkers := runtime.GOMAXPROCS(numCPU / 2)
-	var extractedTexts []string
+
+	// Create a wait group to ensure all Go routines finish before exiting
 	var wg sync.WaitGroup
-	ch := make(chan string, len(timestamps))
-	workerCh := make(chan int, maxWorkers)
 
-	// print maxWorkers
-	fmt.Printf("Max workers: %d\n", maxWorkers)
+	// create a channel to store array of strings
+	textsCh := make(chan string, len(timestamps))
 
+	fmt.Printf("NumGoroutine: %d\n", runtime.NumGoroutine())
+	// print tiemstamps
+	fmt.Printf("Timestamps: %s\n", timestamps)
+	// loop through timestamps and extract text
 	for _, timestamp := range timestamps {
-		fmt.Printf("timestamp:", timestamp)
-		activeWorkers := runtime.NumGoroutine()
-		if activeWorkers < maxWorkers {
-			wg.Add(1)
-			workerCh <- 1 // Send a signal to the worker to indicate a new task
-			go func(ts string) {
-				defer wg.Done()
-				text, err := extractText(filePath, ts)
-				if err != nil {
-					// You may handle the error as needed
-					// For simplicity, let's just log the error here
-					fmt.Println("Error extracting text:", err)
-					return
-				}
-				ch <- text
-			}(timestamp)
+
+		if runtime.NumGoroutine() >= maxWorkers {
+			fmt.Printf("maxWorkers: %d\n", maxWorkers)
+			fmt.Print("Max workers reached, waiting for goroutines to finish...\n")
+			fmt.Printf("NumGoroutine: %d\n", runtime.NumGoroutine())
 			wg.Wait()
 		} else {
-			// Wait for a worker to finish before sending a new signal
-			fmt.Printf("waiting for a new worker:", timestamp)
-			wg.Wait()
+			fmt.Printf("Timestamp: %s\n", timestamp)
+			fmt.Print("Starting new goroutine...\n")
+			wg.Add(1)
+			go extractText(filePath, timestamp, &wg, textsCh)
 		}
+
 	}
 
 	wg.Wait()
-	close(ch)
-	close(workerCh)
+	// Close the results channel after all Go routines have finished
+	close(textsCh)
 
-	for text := range ch {
-		extractedTexts = append(extractedTexts, text)
+	fmt.Print("All goroutines finished...\n")
+
+	var textResults []string
+
+	for text := range textsCh {
+		textResults = append(textResults, text)
 	}
 
-	// print content of extractedTexts
-	fmt.Printf("Extracted texts: %s\n", extractedTexts)
+	fmt.Printf("Text results: %s\n", textResults)
 
 	context.Status(200).JSON(fiber.Map{
-		"filePath":   filePath,
-		"timestamps": timestamps,
+		"filePath":    filePath,
+		"textResults": textResults,
 	})
 
 	return nil
