@@ -15,3 +15,8 @@
 # vendor/
 temp/
 credentials.json
+/go.sum
+/go.mod
+*.env
+*.env.*
+*.local
