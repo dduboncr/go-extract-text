@@ -161,9 +161,8 @@ func Process(context *fiber.Ctx) error {
 		})
 	}
 
-	// timestamps, err := getTimestamps(filePath)
+	timestamps, err := getTimestamps(filePath)
 
-	timestamps := []string{"00:00:00", "00:00:01", "00:00:02", "00:00:03", "00:00:04", "00:00:05"}
 	if err != nil {
 		fmt.Printf("Error getting timestamps: %s\n", err)
 		return context.Status(400).JSON(fiber.Map{
@@ -197,7 +196,6 @@ func Process(context *fiber.Ctx) error {
 			wg.Add(1)
 			go extractText(filePath, timestamp, &wg, textsCh)
 		}
-
 	}
 
 	wg.Wait()
