@@ -116,10 +116,10 @@ func getTimestamps(inputFile string) ([]string, error) {
 	return timestamps, nil
 }
 
-func extractText(inputFile, timestamp string, wg *sync.WaitGroup, results chan<- string) (string, error) {
+func extractText(inputFile, timestamp, language string, wg *sync.WaitGroup, results chan<- string) (string, error) {
 	defer wg.Done()
 
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-visual-texts.bash && extract_text \"%s\" \"%s\"", inputFile, timestamp))
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-visual-texts.bash && extract_text \"%s\" \"%s\" \"%s\"", inputFile, timestamp, language))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -137,12 +137,13 @@ func extractText(inputFile, timestamp string, wg *sync.WaitGroup, results chan<-
 func Process(context *fiber.Ctx) error {
 
 	var requestBody struct {
-		fileUrl string `json:"fileUrl"`
+		fileUrl  string `json:"fileUrl"`
+		language string `json:"language"`
 	}
 
 	if err := context.BodyParser(&requestBody); err != nil {
 		return context.Status(400).JSON(fiber.Map{
-			"message": "fileUrl is required",
+			"message": "fileUrl and language are required",
 		})
 	}
 
@@ -180,11 +181,8 @@ func Process(context *fiber.Ctx) error {
 	textsCh := make(chan string, len(timestamps))
 
 	fmt.Printf("NumGoroutine: %d\n", runtime.NumGoroutine())
-	// print tiemstamps
-	fmt.Printf("Timestamps: %s\n", timestamps)
 	// loop through timestamps and extract text
 	for _, timestamp := range timestamps {
-
 		if runtime.NumGoroutine() >= maxWorkers {
 			fmt.Printf("maxWorkers: %d\n", maxWorkers)
 			fmt.Print("Max workers reached, waiting for goroutines to finish...\n")
@@ -194,7 +192,8 @@ func Process(context *fiber.Ctx) error {
 			fmt.Printf("Timestamp: %s\n", timestamp)
 			fmt.Print("Starting new goroutine...\n")
 			wg.Add(1)
-			go extractText(filePath, timestamp, &wg, textsCh)
+			// later on we can add a language parameter
+			go extractText(filePath, timestamp, "eng", &wg, textsCh)
 		}
 	}
 

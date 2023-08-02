@@ -26,6 +26,8 @@ function get_timestamps() {
 function extract_text() {
     local input_file=$1
     local timestamp=$2
-    local output_text=$(ffmpeg -ss "$timestamp" -i "$input_file" -f image2pipe -frames:v 1 -q:v 2 - | tesseract stdin stdout -l eng)
+    local language=$3
+    local output_text=$(ffmpeg -ss "$timestamp" -i "$input_file" -f image2pipe -frames:v 1 -q:v 2 - | tesseract stdin stdout -l "eng")
+    # local output_text=$(ffmpeg -ss "$timestamp" -i "$input_file" -f image2pipe -frames:v 1 -q:v 2 - | tesseract stdin stdout -l $language)
     echo "<timestamp-$timestamp>$output_text"
 }
