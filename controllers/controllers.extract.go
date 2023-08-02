@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 
@@ -180,6 +182,9 @@ func Process(context *fiber.Ctx) error {
 	// create a channel to store array of strings
 	textsCh := make(chan string, len(timestamps))
 
+	// get first 40 timestamps
+	// firstFourty := timestamps[:25]
+
 	fmt.Printf("NumGoroutine: %d\n", runtime.NumGoroutine())
 	// loop through timestamps and extract text
 	for _, timestamp := range timestamps {
@@ -204,17 +209,107 @@ func Process(context *fiber.Ctx) error {
 	fmt.Print("All goroutines finished...\n")
 
 	var textResults []string
-
 	for text := range textsCh {
 		textResults = append(textResults, text)
 	}
+	sortedResults := sortByTimestampAndRemoveDuplicates(textResults)
+
+	fmt.Printf("Text results length: %d\n", len(textResults))
+	fmt.Printf("Sorted results length: %d\n", len(sortedResults))
 
 	fmt.Printf("Text results: %s\n", textResults)
+	fmt.Printf("Sorted results: %s\n", sortedResults)
 
 	context.Status(200).JSON(fiber.Map{
 		"filePath":    filePath,
-		"textResults": textResults,
+		"textResults": sortedResults,
 	})
 
 	return nil
+}
+
+func normalizeText(inputText string) string {
+	// Replace line breaks and tabs with empty strings
+	normalizedText := strings.ReplaceAll(inputText, "\n", " ")
+	normalizedText = strings.ReplaceAll(normalizedText, "\t", "")
+	// Trim leading and trailing whitespaces
+	normalizedText = strings.TrimSpace(normalizedText)
+
+	return normalizedText
+}
+
+func sortByTimestampAndRemoveDuplicates(arr []string) []string {
+	sortedArr := sortByTimestamp(arr)
+
+	fmt.Printf("Sorted array: %s\n", sortedArr)
+
+	// Filter out empty strings with or without timestamps and those with timestamps but no text
+	filteredArr := make([]string, 0)
+	for idx, s := range sortedArr {
+		timestamp := extractTimestamp(s)
+		normalized := normalizeText(s[8:])
+
+		// Check if the string is empty or has a valid timestamp but no accompanying text
+		if normalized != "" && timestamp != "" {
+			nextText := sortedArr[idx+1]
+			nextNormalizedText := normalizeText(nextText[8:])
+			// fmt.Printf("normalized: %s\n", normalized)
+			// fmt.Printf("nextText: %s\n", nextNormalizedText)
+			// fmt.Printf("HasPrefix: %t\n", strings.HasPrefix(normalized, nextNormalizedText))
+
+			if !strings.HasPrefix(normalized, nextNormalizedText) || !stringExistsInArray(normalized, filteredArr) {
+				filteredArr = append(filteredArr, normalized)
+			}
+		}
+	}
+
+	return filteredArr
+}
+
+func stringExistsInArray(target string, arr []string) bool {
+	for _, str := range arr {
+		if str == target {
+			return true
+		}
+	}
+	return false
+}
+
+func extractTimestamp(s string) string {
+	// Regular expression to match the timestamp inside << >>
+	re := regexp.MustCompile(`(\d{2}:\d{2}:\d{2})`)
+	match := re.FindStringSubmatch(s)
+	if len(match) > 1 {
+		return match[1]
+	}
+	return ""
+}
+
+func sortByTimestamp(arr []string) []string {
+	// Create a custom struct to hold the original string and its timestamp
+	type tuple struct {
+		originalString string
+		timestamp      string
+	}
+
+	// Extract timestamps and create a slice of tuples
+	tuples := make([]tuple, len(arr))
+	for i, s := range arr {
+		tuples[i] = tuple{
+			originalString: s,
+			timestamp:      extractTimestamp(s),
+		}
+	}
+
+	// Sort the slice of tuples based on the timestamps in descending order
+	sort.SliceStable(tuples, func(i, j int) bool {
+		return tuples[i].timestamp > tuples[j].timestamp
+	})
+
+	// Extract and return the sorted strings
+	sortedStrings := make([]string, len(arr))
+	for i, t := range tuples {
+		sortedStrings[i] = t.originalString
+	}
+	return sortedStrings
 }

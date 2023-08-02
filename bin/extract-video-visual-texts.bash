@@ -29,5 +29,5 @@ function extract_text() {
     local language=$3
     local output_text=$(ffmpeg -ss "$timestamp" -i "$input_file" -f image2pipe -frames:v 1 -q:v 2 - | tesseract stdin stdout -l "eng")
     # local output_text=$(ffmpeg -ss "$timestamp" -i "$input_file" -f image2pipe -frames:v 1 -q:v 2 - | tesseract stdin stdout -l $language)
-    echo "<timestamp-$timestamp>$output_text"
+    echo "$timestamp $output_text"
 }
