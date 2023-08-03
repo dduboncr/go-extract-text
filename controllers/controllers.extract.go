@@ -116,9 +116,7 @@ func getTimestamps(inputFile string) ([]string, error) {
 	return timestamps, nil
 }
 
-func extractText(inputFile, timestamp, language string, wg *sync.WaitGroup, results chan string) (string, error) {
-	defer wg.Done()
-
+func extractText(inputFile, timestamp, language string, results chan string) (string, error) {
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-visual-texts.bash && extract_text \"%s\" \"%s\" \"%s\"", inputFile, timestamp, language))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -151,6 +149,7 @@ func Process(context *fiber.Ctx) error {
 
 	// download file from fileUrl
 	filePath, err := downloadFile(
+		// requestBody.FileUrl, // "flowpi-test-bucket", // fileUrl
 		"flowpi-test-bucket", // fileUrl
 		"extract_text.mp4",   // objectName
 		"extract_text.mp4",   // localFilePath
@@ -164,6 +163,7 @@ func Process(context *fiber.Ctx) error {
 	}
 
 	timestamps, err := getTimestamps(filePath)
+	timestamps = timestamps[:10]
 	fmt.Printf("Timestamps: %s\n", timestamps)
 
 	if err != nil {
@@ -173,43 +173,43 @@ func Process(context *fiber.Ctx) error {
 		})
 	}
 
-	numCPU := runtime.NumCPU()
-	maxWorkers := runtime.GOMAXPROCS(numCPU / 2)
-
-	// Create a wait group to ensure all Go routines finish before exiting
+	g := runtime.GOMAXPROCS(0)
 	var wg sync.WaitGroup
+	wg.Add(g)
 
-	// create a channel to store array of strings
-	textsCh := make(chan string, len(timestamps))
+	ch := make(chan string, g)
 
-	fmt.Printf("NumGoroutine: %d\n", runtime.NumGoroutine())
-	// loop through timestamps and extract text
+	resultsCh := make(chan string, len(timestamps))
+
+	for c := 0; c < g; c++ {
+		go func(child int) {
+			fmt.Printf("child %d : waiting for work\n", child)
+			defer wg.Done()
+			for timestamp := range ch {
+				extractText(filePath, timestamp, "eng", resultsCh)
+			}
+			fmt.Printf("child %d : recv'd shutdown signal\n", child)
+		}(c)
+	}
+
 	for _, timestamp := range timestamps {
-		if runtime.NumGoroutine() >= maxWorkers {
-			fmt.Printf("maxWorkers: %d\n", maxWorkers)
-			fmt.Print("Max workers reached, waiting for goroutines to finish...\n")
-			fmt.Printf("NumGoroutine: %d\n", runtime.NumGoroutine())
-			wg.Wait()
-		} else {
-			fmt.Printf("Timestamp: %s\n", timestamp)
-			fmt.Print("Starting new goroutine...\n")
-			wg.Add(1)
-			// later on we can add a language parameter
-			go extractText(filePath, timestamp, "eng", &wg, textsCh)
-		}
+		fmt.Printf("Sending Timestamp to Channel: %s\n", timestamp)
+		ch <- timestamp
 	}
 
 	wg.Wait()
-
 	// Close the results channel after all Go routines have finished
-	close(textsCh)
-
+	close(ch)
+	close(resultsCh)
 	fmt.Print("All goroutines finished...\n")
 
 	var textResults []string
-	for text := range textsCh {
+
+	for text := range resultsCh {
+		fmt.Printf("Text: %s\n", text)
 		textResults = append(textResults, text)
 	}
+
 	sortedResults := sortByTimestampAndRemoveDuplicates(textResults)
 
 	fmt.Printf("Text results length: %d\n", len(textResults))
