@@ -136,18 +136,23 @@ func extractText(inputFile, timestamp, language string, wg *sync.WaitGroup, resu
 	return output, nil
 }
 
+type RequestBody struct {
+	FileUrl  string `json:"fileUrl"`
+	Language string `json:"language"`
+}
+
 func Process(context *fiber.Ctx) error {
 
-	var requestBody struct {
-		fileUrl  string `json:"fileUrl"`
-		language string `json:"language"`
-	}
+	requestBody := new(RequestBody)
 
 	if err := context.BodyParser(&requestBody); err != nil {
 		return context.Status(400).JSON(fiber.Map{
 			"message": "fileUrl and language are required",
 		})
 	}
+
+	fmt.Printf("FileUrl: %s\n", requestBody.FileUrl)
+	fmt.Printf("Language: %s\n", requestBody.Language)
 
 	// download file from fileUrl
 	filePath, err := downloadFile(
