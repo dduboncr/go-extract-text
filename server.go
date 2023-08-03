@@ -11,11 +11,9 @@ import (
 
 func SetupRoutes(app *fiber.App) {
 	app.Post("/process", controllers.Process)
-
 }
 
 func main() {
-
 	app := fiber.New()
 
 	SetupRoutes(app)

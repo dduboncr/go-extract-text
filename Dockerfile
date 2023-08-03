@@ -1,7 +1,11 @@
-# Use the official Node.js image as the base image
-FROM golang:1.20-alpine
+FROM golang:1.20-alpine AS builder
 
-# Install Bash
+WORKDIR /app
+COPY . .
+RUN go build -o go-video-extractor
+
+FROM golang:1.20-alpine AS final
+
 RUN apk add --no-cache bash
 
 # Install ffmpeg
@@ -10,7 +14,7 @@ RUN apk update && \
     rm -rf /var/lib/apt/lists/*
 
 # Set environment variables for Tesseract installation
-ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr
+ENV TESSDATA_PREFIX=/usr/share/tessdata
 
 # Install Tesseract and its dependencies
 RUN apk --no-cache add \
@@ -21,18 +25,13 @@ RUN apk --no-cache add \
     && mkdir -p $TESSDATA_PREFIX \
     && chmod 755 $TESSDATA_PREFIX
 
-# Your Go application setup here (copy your Go code and build it, if needed)
-# For example:
-
 WORKDIR /app
-COPY . .
-RUN go build -o go-video-extractor
 
-# Start your Go application (replace "my_app" with your actual binary name)
-# For example:
-# CMD ["./my_app"]
+COPY --from=builder /app/go-video-extractor .
+COPY --from=builder /app/credentials.json .
+COPY --from=builder /app/bin ./bin
 
 EXPOSE 3000
 
-CMD [ "tail", "-f", "/dev/null" ]
+CMD [ "./go-video-extractor" ]
 

@@ -109,16 +109,14 @@ func getTimestamps(inputFile string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error executing bash script: %s", stderr.String())
 	}
-	output := strings.TrimSpace(stdout.String())
-	fmt.Printf("Output: %s\n", output)
-	timestamps := strings.Split(output, " ")
 
-	fmt.Printf("Timestamps: %s\n", timestamps)
+	output := strings.TrimSpace(stdout.String())
+	timestamps := strings.Split(output, " ")
 
 	return timestamps, nil
 }
 
-func extractText(inputFile, timestamp, language string, wg *sync.WaitGroup, results chan<- string) (string, error) {
+func extractText(inputFile, timestamp, language string, wg *sync.WaitGroup, results chan string) (string, error) {
 	defer wg.Done()
 
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-visual-texts.bash && extract_text \"%s\" \"%s\" \"%s\"", inputFile, timestamp, language))
@@ -139,8 +137,8 @@ func extractText(inputFile, timestamp, language string, wg *sync.WaitGroup, resu
 func Process(context *fiber.Ctx) error {
 
 	var requestBody struct {
-		fileUrl  string `json:"fileUrl"`
-		language string `json:"language"`
+		FileUrl  string `json:"fileUrl"`
+		Language string `json:"language"`
 	}
 
 	if err := context.BodyParser(&requestBody); err != nil {
@@ -148,6 +146,8 @@ func Process(context *fiber.Ctx) error {
 			"message": "fileUrl and language are required",
 		})
 	}
+
+	fmt.Printf("FileUrl: %s\n", requestBody.FileUrl)
 
 	// download file from fileUrl
 	filePath, err := downloadFile(
@@ -157,7 +157,6 @@ func Process(context *fiber.Ctx) error {
 	)
 
 	fmt.Printf("Filepath: %s\n", filePath)
-
 	if err != nil {
 		return context.Status(400).JSON(fiber.Map{
 			"message": "error downloading file",
@@ -165,6 +164,7 @@ func Process(context *fiber.Ctx) error {
 	}
 
 	timestamps, err := getTimestamps(filePath)
+	fmt.Printf("Timestamps: %s\n", timestamps)
 
 	if err != nil {
 		fmt.Printf("Error getting timestamps: %s\n", err)
@@ -181,9 +181,6 @@ func Process(context *fiber.Ctx) error {
 
 	// create a channel to store array of strings
 	textsCh := make(chan string, len(timestamps))
-
-	// get first 40 timestamps
-	// firstFourty := timestamps[:25]
 
 	fmt.Printf("NumGoroutine: %d\n", runtime.NumGoroutine())
 	// loop through timestamps and extract text
@@ -203,6 +200,7 @@ func Process(context *fiber.Ctx) error {
 	}
 
 	wg.Wait()
+
 	// Close the results channel after all Go routines have finished
 	close(textsCh)
 
@@ -220,13 +218,131 @@ func Process(context *fiber.Ctx) error {
 	fmt.Printf("Text results: %s\n", textResults)
 	fmt.Printf("Sorted results: %s\n", sortedResults)
 
-	context.Status(200).JSON(fiber.Map{
+	return context.Status(200).JSON(fiber.Map{
 		"filePath":    filePath,
 		"textResults": sortedResults,
 	})
-
-	return nil
 }
+
+// func Process(context *fiber.Ctx) error {
+
+// 	var requestBody struct {
+// 		fileUrl  string `json:"fileUrl"`
+// 		language string `json:"language"`
+// 	}
+
+// 	if err := context.BodyParser(&requestBody); err != nil {
+// 		return context.Status(400).JSON(fiber.Map{
+// 			"message": "fileUrl and language are required",
+// 		})
+// 	}
+
+// 	// download file from fileUrl
+// 	filePath, err := downloadFile(
+// 		"flowpi-test-bucket", // fileUrl
+// 		"extract_text.mp4",   // objectName
+// 		"extract_text.mp4",   // localFilePath
+// 	)
+
+// 	fmt.Printf("Filepath: %s\n", filePath)
+
+// 	if err != nil {
+// 		return context.Status(400).JSON(fiber.Map{
+// 			"message": "error downloading file",
+// 		})
+// 	}
+
+// 	timestamps, err := getTimestamps(filePath)
+
+// 	if err != nil {
+// 		fmt.Printf("Error getting timestamps: %s\n", err)
+// 		return context.Status(400).JSON(fiber.Map{
+// 			"message": "error getting video duration",
+// 		})
+// 	}
+
+// 	resultsChan := make(chan string, len(timestamps))
+// 	go processFile(10, filePath, timestamps, "eng", resultsChan)
+// 	result := <-resultsChan
+
+// 	fmt.Printf("Result: %s\n", result)
+
+// 	fmt.Printf("Results: %v", len(resultsChan))
+// 	fmt.Print("All goroutines finished...\n")
+
+// 	var textResults []string
+
+// 	sortedResults := sortByTimestampAndRemoveDuplicates(textResults)
+
+// 	fmt.Printf("Text results length: %d\n", len(textResults))
+// 	fmt.Printf("Sorted results length: %d\n", len(sortedResults))
+
+// 	fmt.Printf("Text results: %s\n", textResults)
+// 	fmt.Printf("Sorted results: %s\n", sortedResults)
+
+// 	context.Status(200).JSON(fiber.Map{
+// 		"filePath":    filePath,
+// 		"textResults": sortedResults,
+// 	})
+
+// 	return nil
+// }
+
+// func processFile(concurrency int, inputFilePath string, timestamps []string, language string, results chan string) error {
+// 	in := make(chan int, runtime.NumCPU()) // which frame (timestamp) to extract
+// 	// returnChannel := make(chan string)     // capture extracted texts to this channel
+
+// 	for process := 0; process < concurrency; process++ {
+// 		go extractTextWorker(in, results, inputFilePath, timestamps, language)
+// 	}
+
+// 	go func() {
+// 		for x := 0; x < len(timestamps); x++ {
+// 			in <- x
+// 		}
+// 		close(in)
+// 	}()
+
+// 	for r := range results {
+// 		results <- r
+// 		if r == "__EXTRACTION_COMPLETED__" {
+// 			break
+// 		}
+// 	}
+
+// 	return nil
+// }
+
+// func extractTextWorker(in chan int, returnChan chan string, inputFilePath string, timestamps []string, language string) {
+// 	for x := range in {
+// 		output, err := _extractText(inputFilePath, timestamps[x], language)
+
+// 		if err != nil {
+// 			fmt.Printf("Error extracting text from timestamp \"%s\":\n%s\n", timestamps[x], err)
+// 			returnChan <- ""
+// 		} else {
+// 			returnChan <- output
+// 		}
+// 	}
+
+// 	returnChan <- "__EXTRACTION_COMPLETED__"
+// }
+
+// func _extractText(inputFile, timestamp, language string) (string, error) {
+// 	fmt.Printf("Extracting text from timestamp \"%s\"...\n", timestamp)
+
+// 	cmd := exec.Command("bash", "-c", fmt.Sprintf("source ./bin/extract-video-visual-texts.bash && extract_text \"%s\" \"%s\" \"%s\"", inputFile, timestamp, language))
+// 	var stdout, stderr bytes.Buffer
+// 	cmd.Stdout = &stdout
+// 	cmd.Stderr = &stderr
+// 	err := cmd.Run()
+// 	if err != nil {
+// 		return "", fmt.Errorf("error executing bash script: %s", stderr.String())
+// 	}
+// 	output := strings.TrimSpace(stdout.String())
+
+// 	return output, nil
+// }
 
 func normalizeText(inputText string) string {
 	// Replace line breaks and tabs with empty strings
@@ -247,11 +363,24 @@ func sortByTimestampAndRemoveDuplicates(arr []string) []string {
 	filteredArr := make([]string, 0)
 	for idx, s := range sortedArr {
 		timestamp := extractTimestamp(s)
+
+		if len(s) < 9 {
+			fmt.Printf("String \"%s\" is too short\n", s)
+			continue
+		}
+
 		normalized := normalizeText(s[8:])
 
 		// Check if the string is empty or has a valid timestamp but no accompanying text
 		if normalized != "" && timestamp != "" {
 			nextText := sortedArr[idx+1]
+
+			// Check if the next string is the last in the array
+			// In that case compare the current string with the previous string
+			if idx == len(sortedArr)-1 {
+				nextText = sortedArr[idx-2]
+			}
+
 			nextNormalizedText := normalizeText(nextText[8:])
 			// fmt.Printf("normalized: %s\n", normalized)
 			// fmt.Printf("nextText: %s\n", nextNormalizedText)
