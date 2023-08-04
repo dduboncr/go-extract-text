@@ -15,6 +15,7 @@
 # vendor/
 temp/
 
+frames/
 credentials.json
 *.env
 *.env.*
