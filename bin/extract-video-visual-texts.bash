@@ -25,18 +25,10 @@ function get_timestamps() {
   echo "${timestamps_list[@]}"
 }
 
-function extract_text() {
-  local input_file=$1
-  local timestamp=$2
-  local language=$3
-  local output_text=$(ffmpeg -ss "$timestamp" -i "$input_file" -f image2pipe -frames:v 1 -q:v 2 - | tesseract stdin stdout -l $language)
-  echo "$timestamp $output_text"
-}
-
 function ffmpeg_extract_frames() {
   local input_file=$1
   local output_file=$3
-  ffmpeg -i $input_file -vf "fps=0.5" frames/frame_%5d.jpg
+  ffmpeg -i $input_file -vf frames/frame_%5d.jpg
 }
 
 function tesseract_extract_text() {

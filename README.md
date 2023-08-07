@@ -17,9 +17,9 @@ Go to the project root directory and run:
 
 2. `docker run --name go-extract --rm -it -v .:/go/src -p 3000:3000 go-extract`
 
-3. ```
+3. ```bash
     curl http://127.0.0.1:3000/process \
         -H "Content-Type: application/json" \
         -H "x-api-key": "<API_KEY>" \
-        -d '{ "fileUrl": "<BUCKET_FILE_URL>" }'
+        -d '{ "fileUrl": "gs://<BUCKET_NAME>/<FILE_PATH>" }'
 
