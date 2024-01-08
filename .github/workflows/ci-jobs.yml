@@ -47,44 +47,44 @@ jobs:
       REPOSITORY: mkms-multimedia-processing
       REGION: us-central1
 
-    steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
+    # steps:
+    #   # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+    #   - uses: actions/checkout@v3
 
-      - name: Update SHA
-        run: |
-          export GITHUB_BUILD=$(echo $GITHUB_SHA | head -c7) && \
-          echo $GITHUB_BUILD
+    #   - name: Update SHA
+    #     run: |
+    #       export GITHUB_BUILD=$(echo $GITHUB_SHA | head -c7) && \
+    #       echo $GITHUB_BUILD
 
-      - id: 'Auth'
-        uses: 'google-github-actions/auth@v0'
-        with:
-          credentials_json: '${{ secrets.CI_GCP_CREDENTIALS }}'
+    #   - id: 'Auth'
+    #     uses: 'google-github-actions/auth@v0'
+    #     with:
+    #       credentials_json: '${{ secrets.CI_GCP_CREDENTIALS }}'
 
-      - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/setup-gcloud@v0'
-        with:
-          install_components: 'beta'
+    #   - name: 'Set up Cloud SDK'
+    #     uses: 'google-github-actions/setup-gcloud@v0'
+    #     with:
+    #       install_components: 'beta'
 
-      - name: 'Use gcloud CLI'
-        run: 'gcloud info'
+    #   - name: 'Use gcloud CLI'
+    #     run: 'gcloud info'
 
-      - name: Authorize Docker push
-        run: gcloud auth configure-docker ${REGION}-docker.pkg.dev
+    # - name: Authorize Docker push
+    #   run: gcloud auth configure-docker ${REGION}-docker.pkg.dev
 
-      - name: Build and Push Container
-        run: |
-          echo ${REPOSITORY}
-          GITHUB_BUILD=$(echo ${{  github.sha }} | head -c7)  && \
-          docker build --build-arg GCP_CREDS_JSON_BASE64="${{ secrets.GCP_CREDS_JSON_BASE64 }}" -f Dockerfile -t ${REPOSITORY} ./
-          docker tag ${REPOSITORY} "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${REPOSITORY}:${{ github.sha }}"
-          docker push "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${REPOSITORY}:${{ github.sha }}"
+    # - name: Build and Push Container
+    #   run: |
+    #     echo ${REPOSITORY}
+    #     GITHUB_BUILD=$(echo ${{  github.sha }} | head -c7)  && \
+    #     docker build --build-arg GCP_CREDS_JSON_BASE64="${{ secrets.GCP_CREDS_JSON_BASE64 }}" -f Dockerfile -t ${REPOSITORY} ./
+    #     docker tag ${REPOSITORY} "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${REPOSITORY}:${{ github.sha }}"
+    #     docker push "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${REPOSITORY}:${{ github.sha }}"
 
-      - name: Deploy to Cloud Run
-        id: deploy
-        uses: google-github-actions/deploy-cloudrun@v0
-        with:
-          service: ${{ env.REPOSITORY }}
-          region: ${{ env.REGION }}
-          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.REPOSITORY }}:${{ github.sha }}
-          timeout: '10m5s'
+    # - name: Deploy to Cloud Run
+    #   id: deploy
+    #   uses: google-github-actions/deploy-cloudrun@v0
+    #   with:
+    #     service: ${{ env.REPOSITORY }}
+    #     region: ${{ env.REGION }}
+    #     image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.REPOSITORY }}:${{ github.sha }}
+    #     timeout: '10m5s'
