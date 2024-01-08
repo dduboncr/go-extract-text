@@ -13,12 +13,12 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
-temp/
+temp/**/*
 
+frames/
 credentials.json
-/go.sum
-/go.mod
+credentials copy.json
 *.env
 *.env.*
 *.local
-extract_text.mp4
+*.mp4

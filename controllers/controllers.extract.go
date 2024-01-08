@@ -1,175 +1,233 @@
 package controllers
 
 import (
-	"context"
+	"bytes"
+	"extract/storage"
+	"extract/utils"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
+	"regexp"
+	"runtime"
+	"strings"
 	"time"
 
-	"cloud.google.com/go/storage"
 	"github.com/gofiber/fiber/v2"
-	"google.golang.org/api/option"
+	"github.com/google/uuid"
 )
 
-func secondsToTimeList(totalSeconds int) []string {
-	var timeList []string
-
-	for seconds := 1; seconds <= totalSeconds; seconds++ {
-		hours := seconds / 3600
-		minutes := (seconds % 3600) / 60
-		remainingSeconds := seconds % 60
-
-		// Pad single-digit hours, minutes, and seconds with leading zeros
-		formattedTime := fmt.Sprintf("%02d:%02d:%02d", hours, minutes, remainingSeconds)
-
-		timeList = append(timeList, formattedTime)
-	}
-
-	return timeList
+type TextResult struct {
+	Text      string `json:"text"`
+	Timestamp struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+	} `json:"timestamp"`
 }
 
-func getVideoDurationSeconds(inputFile string) (int64, error) {
-	// Get file info
-	fileInfo, err := os.Stat(inputFile)
+func extractFrames(localFilePath, framesFolder, filename string) ([]string, error) {
+	os.RemoveAll(framesFolder)
+	err := os.Mkdir(framesFolder, 0755)
 	if err != nil {
-		return 0, err
+		fmt.Printf("Error creating frames folder: %s\n", err)
+		return nil, err
 	}
 
-	// Get the file's modification time
-	modTime := fileInfo.ModTime()
+	filepath := localFilePath + "/" + filename
 
-	// Calculate the duration in seconds from the modification time
-	durationSeconds := time.Since(modTime).Seconds()
+	cmd := exec.Command("ffmpeg", "-nostdin", "-i", filepath, "-loglevel", "error", "-threads", "3", "-vf", "fps=1", framesFolder+"/frame_sec_%d.jpg")
 
-	return int64(durationSeconds), nil
+	// create just 5 frame
+	// cmd := exec.Command("ffmpeg", "-i", filepath, "-vf", "fps=1", "-vframes", "5", framesFolder+"/frame_sec_%d.jpg")
+	// Set up the standard output and error output to be the same as the current process
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// Execute the command
+	err = cmd.Run()
+
+	if err != nil {
+		fmt.Printf("Error executing bash script %s: %s\n", filepath, err)
+		return nil, err
+	}
+
+	files, err := os.ReadDir(framesFolder)
+	if err != nil {
+		return nil, err
+	}
+
+	var fileNames []string
+	for _, file := range files {
+		if !file.IsDir() {
+			fileNames = append(fileNames, file.Name())
+		}
+	}
+
+	// return just first frame
+	return fileNames, nil
 }
 
-func fileExists(filename string) bool {
-	// Use os.Stat to get file information
-	_, err := os.Stat(filename)
+func extractText(inputFilename, tmpFramerFolder, language string, results chan<- string) {
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("echo $(tesseract %s/\"%s\" stdout -l \"%s\")", tmpFramerFolder, inputFilename, language))
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 
-	// Check if there was no error and the file exists
-	if err == nil {
-		return true
+	err := cmd.Run()
+
+	if err != nil {
+		results <- ""
+	} else {
+		output := strings.TrimSpace(stdout.String())
+		secs, err := utils.ExtractSeconds(inputFilename)
+		if err != nil {
+			results <- ""
+		} else {
+			hhmmss := utils.SecondsToHHMMSS(secs)
+			results <- fmt.Sprintf("%s %s", hhmmss, output)
+		}
 	}
-
-	// If os.Stat returns an error, check if it's a "not found" error
-	if os.IsNotExist(err) {
-		return false
-	}
-
-	// If there was some other error (permissions, etc.), return false as well
-	return false
 }
 
-func downloadFile(bucketName, objectName, localFilePath string) (string, error) {
-
-	if fileExists(localFilePath) {
-		fmt.Printf("File already exists in local: %s\n", localFilePath)
-		return localFilePath, nil
+func extractBucketNameAndObjectPath(fileUrl string) (string, string, string, error) {
+	regex := regexp.MustCompile(`gs://([^/]+)/(.+)`)
+	matches := regex.FindStringSubmatch(fileUrl)
+	if len(matches) < 3 {
+		return "", "", "", fmt.Errorf("invalid fileUrl")
 	}
+	bucketName := matches[1]
+	bucketFilepath := matches[2]
 
-	// Create a context and a storage client using your Google Cloud credentials.
-	ctx := context.Background()
-	client, err := storage.NewClient(ctx, option.WithCredentialsFile("./credentials.json"))
+	bucketFilepathParts := strings.Split(bucketFilepath, "/")
+	bucketFilename := bucketFilepathParts[len(bucketFilepathParts)-1]
 
-	if err != nil {
-		return "", fmt.Errorf("error creating GCS client: %v", err)
-	}
-	defer client.Close()
-
-	// Open the GCS bucket and the object (file) you want to download.
-	bucket := client.Bucket(bucketName)
-	object := bucket.Object(objectName)
-
-	// Create a new local file to save the downloaded data.
-	localFile, err := os.Create(localFilePath)
-	if err != nil {
-		return "", fmt.Errorf("error creating local file: %v", err)
-	}
-	defer localFile.Close()
-
-	// Download the object data and write it to the local file.
-	reader, err := object.NewReader(ctx)
-	if err != nil {
-		return "", fmt.Errorf("error reading object: %v", err)
-	}
-	defer reader.Close()
-
-	if _, err := io.Copy(localFile, reader); err != nil {
-		return "", fmt.Errorf("error copying object data to local file: %v", err)
-	}
-
-	return localFilePath, nil
+	return bucketName, bucketFilepath, bucketFilename, nil
 }
 
-func getVideoDuration(inputVideoPath string) (string, error) {
-	// get video duration using ffmpeg
-	cmd := exec.Command("ffmpeg", "-i", inputVideoPath, "2>&1", "|", "grep", "Duration", "|", "awk", "'{print $2}'", "|", "tr", "-d", ",")
-	// run the command and get the output
-	out, err := cmd.Output()
-	if err != nil {
-		fmt.Printf("Error executing bash script %s: %s\n", inputVideoPath, err)
-		return "", err
-	}
-
-	return string(out), nil
+var requestBody struct {
+	FileUrl  string `json:"fileUrl"`
+	Language string `json:"language"`
 }
 
 func Process(context *fiber.Ctx) error {
-
-	// get fileUrl from body
-	var requestBody struct {
-		fileUrl string `json:"fileUrl"`
-	}
+	start := time.Now()
 
 	if err := context.BodyParser(&requestBody); err != nil {
 		return context.Status(400).JSON(fiber.Map{
-			"message": "fileUrl is required",
+			"message": "fileUrl and language are required",
 		})
 	}
 
-	// download file from fileUrl
-	filePath, err := downloadFile(
-		"flowpi-test-bucket",
-		"extract_text.mp4",
-		"extract_text.mp4",
-	)
+	uuid := uuid.New().String()
 
-	// log filepath
-	fmt.Printf("Filepath: %s\n", filePath)
+	err := os.Mkdir("/tmp/"+uuid, 0755)
+	if err != nil {
+		return context.Status(500).JSON(fiber.Map{
+			"message": "Error creating tmp file folder:" + err.Error(),
+		})
+	}
+
+	fmt.Printf("Start Processing video with file url %s\n", requestBody.FileUrl)
+	localFilePath := "/tmp/" + uuid
+	bucketName, bucketFilepath, bucketFilename, err := extractBucketNameAndObjectPath(requestBody.FileUrl)
 
 	if err != nil {
 		return context.Status(400).JSON(fiber.Map{
-			"message": "error downloading file",
+			"message": err.Error(),
 		})
 	}
 
-	duration, durationErr := getVideoDurationSeconds(filePath)
-	secondList := secondsToTimeList(int(duration))
+	downloadFileStart := time.Now()
+	_, err = storage.DownloadFile(
+		bucketName,
+		bucketFilepath,
+		bucketFilename,
+		localFilePath,
+	)
+	fmt.Printf("Download file took %v to run.\n", time.Since(downloadFileStart).Seconds())
 
-	if durationErr != nil {
-		// print error
-		fmt.Printf("Error getting video duration: %s\n", durationErr)
+	if err != nil {
 		return context.Status(400).JSON(fiber.Map{
-			"message": "error getting video duration",
+			"message": err.Error(),
 		})
 	}
-	// // extract frames from video
-	// err = extractFrames(filePath)
 
-	// if err != nil {
-	// 	return context.Status(400).JSON(fiber.Map{
-	// 		"message": "error extracting frames",
-	// 	})
-	// }
+	framesFolder := localFilePath + "/frames"
 
-	context.Status(200).JSON(fiber.Map{
-		"filePath":   filePath,
-		"secondList": secondList,
+	fmt.Printf("Start extracting frames...\n")
+	framesExtractStart := time.Now()
+	frames, err := extractFrames(localFilePath, framesFolder, bucketFilename)
+	fmt.Printf("Extract frames took %v to run.\n", time.Since(framesExtractStart).Seconds())
+
+	if err != nil {
+		fmt.Printf("Error extracting frames: %s\n", err)
+		return context.Status(500).JSON(fiber.Map{
+			"message": "error extracting frames",
+		})
+	}
+
+	maxWorkers := runtime.GOMAXPROCS(0)
+
+	fmt.Printf("Max workers: %d\n", maxWorkers)
+
+	framesCh := make(chan string, len(frames))
+	resultsCh := make(chan string, len(frames))
+
+	for i := 0; i < maxWorkers; i++ {
+		go worker(framesCh, framesFolder, requestBody.Language, resultsCh)
+	}
+
+	for _, frame := range frames {
+		framesCh <- frame
+	}
+
+	close(framesCh)
+
+	var textResults []string
+
+	for i := 0; i < len(frames); i++ {
+		result := <-resultsCh
+		textResults = append(textResults, result)
+	}
+
+	close(resultsCh)
+
+	removeDuplicateStartTime := time.Now()
+	sortedResults := utils.SortByTimestampAndRemoveDuplicates(textResults)
+	fmt.Printf("SortByTimestampAndRemoveDuplicates took %v to run.\n", time.Since(removeDuplicateStartTime).Seconds())
+
+	removeFolderStartTime := time.Now()
+	os.RemoveAll(localFilePath)
+	fmt.Printf("Removed tmp folder took %v to run.\n", time.Since(removeFolderStartTime).Seconds())
+
+	fmt.Printf("The Entire processing took %v to run.\n", time.Since(start).Seconds())
+
+	fmt.Printf("Finish processing video...\n")
+
+	var textResultsArray []TextResult
+	transformResultStartTime := time.Now()
+	for timestamp, text := range sortedResults {
+		textResultsArray = append(textResultsArray, TextResult{
+			Text: text,
+			Timestamp: struct {
+				Start string `json:"start"`
+				End   string `json:"end"`
+			}{
+				Start: timestamp,
+				End:   timestamp,
+			},
+		},
+		)
+
+	}
+	fmt.Printf("Transform result took %v to run.\n", time.Since(transformResultStartTime).Seconds())
+
+	return context.Status(200).JSON(fiber.Map{
+		"textResults":     textResultsArray,
+		"secondsToFinish": time.Since(start).Seconds(),
 	})
+}
 
-	return nil
+func worker(framesCh <-chan string, framesFolder, language string, resultsCh chan<- string) {
+	for frame := range framesCh {
+		extractText(frame, framesFolder, language, resultsCh)
+	}
 }
